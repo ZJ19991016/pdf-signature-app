@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#111827">
+<link rel="manifest" href="manifest.json">
+<title>PDF 签名助手</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f4f6;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{position:sticky;top:0;z-index:5;background:#111827;color:white;padding:14px 16px;display:flex;align-items:center;justify-content:space-between}
+h1{font-size:18px;margin:0}.sub{font-size:12px;color:#cbd5e1}
+main{max-width:900px;margin:auto;padding:14px}.panel{background:white;border-radius:14px;padding:14px;margin:12px 0;box-shadow:0 2px 12px #0000000b}
+button,.btn{border:0;border-radius:10px;background:#2563eb;color:white;padding:12px 14px;font-size:15px;font-weight:600;cursor:pointer}
+button.secondary{background:#e5e7eb;color:#111827}button.danger{background:#dc2626}
+input[type=file]{max-width:100%}.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#viewerWrap{position:relative;background:#d1d5db;border-radius:10px;overflow:auto;min-height:180px;text-align:center;padding:8px}
+#canvas{max-width:100%;height:auto;background:white;box-shadow:0 2px 8px #0002;touch-action:none}
+#sigCanvas{position:absolute;touch-action:none;inset:0;width:100%;height:100%;display:none}
+label{font-size:14px}input[type=range]{width:100%}.status{font-size:13px;color:#4b5563;white-space:pre-wrap}
+#sigPreview{max-width:100%;height:120px;border:1px dashed #9ca3af;background:#fff;border-radius:8px;touch-action:none}
+</style>
+</head>
+<body>
+<header><div><h1>PDF 签名助手</h1><div class="sub">本地处理 · 不上传文件</div></div><button id="install" class="secondary" style="display:none">安装</button></header>
+<main>
+<section class="panel">
+<div class="toolbar"><label class="btn" for="pdfInput">选择 PDF</label><input id="pdfInput" type="file" accept="application/pdf" hidden>
+<button id="prev" class="secondary" disabled>上一页</button><span id="pageInfo">未打开文件</span><button id="next" class="secondary" disabled>下一页</button></div>
+<p class="status" id="status">选择 PDF 文件开始。首次加载 PDF 引擎需要网络；缓存后可尝试离线使用。</p>
+</section>
+<section class="panel">
+<div id="viewerWrap"><canvas id="canvas"></canvas><canvas id="sigCanvas"></canvas></div>
+<div class="toolbar" style="margin-top:10px"><button id="signMode" disabled>放置签名</button><button id="clearPlaced" class="secondary" disabled>清除本页签名</button><button id="export" disabled>导出签名 PDF</button></div>
+</section>
+<section class="panel">
+<h3 style="margin-top:0">绘制签名</h3>
+<canvas id="sigPreview"></canvas>
+<div class="toolbar" style="margin-top:8px"><button id="clearSig" class="secondary">清空签名</button><button id="useSig" disabled>使用此签名</button><label class="btn" for="sigFile">导入签名图片</label><input id="sigFile" type="file" accept="image/*" hidden></div>
+<label>签名大小 <span id="sizeLabel">180</span> px</label><input id="size" type="range" min="60" max="360" value="180">
+<p class="status">提示：先在上方框内手写签名，再点击「使用此签名」，然后在 PDF 页面点选放置位置。可拖动已放置签名调整位置。</p>
+</section>
+<section class="panel">
+<h3 style="margin-top:0">保存</h3>
+<div class="toolbar"><button id="saveSig" class="secondary">保存签名到本机</button><button id="loadSig" class="secondary">载入本机签名</button></div>
+<p class="status">签名仅保存在当前浏览器设备。导出文件由浏览器下载保存。</p>
+</section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script>
+<script type="module">
+import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
+import { PDFDocument } from 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm';
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+const $=id=>document.getElementById(id), canvas=$('canvas'), ctx=canvas.getContext('2d'), sig=$('sigCanvas'), sctx=sig.getContext('2d'), preview=$('sigPreview'), pctx=preview.getContext('2d');
+let pdfBytes=null,pdf=null,page=1,signature=null,placed=[],placing=false,drag=null,scale=1;
+function status(t){$('status').textContent=t}
+function fitPreview(){const r=preview.getBoundingClientRect();preview.width=Math.max(320,r.width*devicePixelRatio);preview.height=120*devicePixelRatio;pctx.scale(devicePixelRatio,devicePixelRatio)}
+fitPreview();window.addEventListener('resize',fitPreview);
+let drawing=false;
+function point(e,c){let r=c.getBoundingClientRect();return {x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height}}
+preview.addEventListener('pointerdown',e=>{drawing=true;preview.setPointerCapture(e.pointerId);let p=point(e,preview);pctx.beginPath();pctx.moveTo(p.x/devicePixelRatio,p.y/devicePixelRatio)});
+preview.addEventListener('pointermove',e=>{if(!drawing)return;let p=point(e,preview);pctx.lineWidth=3;pctx.lineCap='round';pctx.lineJoin='round';pctx.strokeStyle='#111827';pctx.lineTo(p.x/devicePixelRatio,p.y/devicePixelRatio);pctx.stroke();$('useSig').disabled=false});
+preview.addEventListener('pointerup',()=>drawing=false);preview.addEventListener('pointercancel',()=>drawing=false);
+$('clearSig').onclick=()=>{pctx.clearRect(0,0,preview.width,preview.height);signature=null;$('useSig').disabled=true};
+$('useSig').onclick=()=>{signature=preview.toDataURL('image/png');placing=true;status('签名已准备好：点击 PDF 页面放置签名。')};
+$('sigFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;const img=new Image();img.onload=()=>{pctx.clearRect(0,0,preview.width,preview.height);let w=preview.width,h=preview.height,ratio=Math.min(w/img.width,h/img.height);pctx.drawImage(img,(w-img.width*ratio)/2,(h-img.height*ratio)/2,img.width*ratio,img.height*ratio);signature=preview.toDataURL('image/png');$('useSig').disabled=false;status('签名图片已载入。')};img.src=URL.createObjectURL(f)};
+$('pdfInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{pdfBytes=await f.arrayBuffer();pdf=await pdfjsLib.getDocument({data:pdfBytes}).promise;page=1;placed=[];await render();$('prev').disabled=$('next').disabled=false;$('export').disabled=false;$('signMode').disabled=false;$('clearPlaced').disabled=false;status('PDF 已载入。签名会嵌入导出文件。')}catch(err){status('打开失败：'+err.message)}};
+async function render(){const pg=await pdf.getPage(page),vp=pg.getViewport({scale:1.25});canvas.width=vp.width;canvas.height=vp.height;await pg.render({canvasContext:ctx,viewport:vp}).promise;$('pageInfo').textContent=`第 ${page} / ${pdf.numPages} 页`;sig.width=canvas.width;sig.height=canvas.height;sig.style.display='block';drawOverlay()}
+function drawOverlay(){sctx.clearRect(0,0,sig.width,sig.height);placed.filter(x=>x.page===page).forEach(x=>{let img=new Image();img.onload=()=>sctx.drawImage(img,x.x,x.y,x.w,x.h);img.src=x.data})}
+$('prev').onclick=async()=>{if(page>1){page--;await render()}};$('next').onclick=async()=>{if(page<pdf.numPages){page++;await render()}};
+$('signMode').onclick=()=>{placing=true;status(signature?'点击 PDF 页面放置签名。':'请先绘制或导入签名。');};
+sig.addEventListener('pointerdown',e=>{const p=point(e,sig);let hit=placed.find(x=>x.page===page&&p.x>=x.x&&p.x<=x.x+x.w&&p.y>=x.y&&p.y<=x.y+x.h);if(hit){drag={item:hit,dx:p.x-hit.x,dy:p.y-hit.y};sig.setPointerCapture(e.pointerId)}else if(placing&&signature){let w=Number($('size').value),img=new Image();img.onload=()=>{let h=w*img.height/img.width;placed.push({page,x:p.x-w/2,y:p.y-h/2,w,h,data:signature});placing=false;drawOverlay()};img.src=signature}});
+sig.addEventListener('pointermove',e=>{if(drag){let p=point(e,sig);drag.item.x=p.x-drag.dx;drag.item.y=p.y-drag.dy;drawOverlay()}});
+sig.addEventListener('pointerup',()=>drag=null);sig.addEventListener('pointercancel',()=>drag=null);
+$('size').oninput=e=>$('sizeLabel').textContent=e.target.value;
+$('clearPlaced').onclick=()=>{placed=placed.filter(x=>x.page!==page);drawOverlay()};
+$('export').onclick=async()=>{if(!pdfBytes)return;try{status('正在生成 PDF…');const doc=await PDFDocument.load(pdfBytes);for(const item of placed){const pg=doc.getPage(item.page-1),{width,height}=pg.getSize();const png=await doc.embedPng(item.data);const x=item.x/canvas.width*width,y=height-(item.y+item.h)/canvas.height*height,w=item.w/canvas.width*width,h=item.h/canvas.height*height;pg.drawImage(png,{x,y,width:w,height:h})}const out=await doc.save(),blob=new Blob([out],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='signed.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('导出完成：signed.pdf')}catch(err){status('导出失败：'+err.message)}};
+$('saveSig').onclick=()=>{if(signature){localStorage.setItem('pdfsig',signature);status('签名已保存在本机浏览器。')}else status('请先绘制或导入签名。')};
+$('loadSig').onclick=()=>{let s=localStorage.getItem('pdfsig');if(!s){status('本机尚无保存的签名。');return}signature=s;let im=new Image();im.onload=()=>{pctx.clearRect(0,0,preview.width,preview.height);pctx.drawImage(im,0,0,preview.width,preview.height);$('useSig').disabled=false;status('已载入本机签名。')};im.src=s};
+let deferred;$('install').onclick=()=>deferred?.prompt();window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e;$('install').style.display='block'});
+if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+</script>
+</body>
+</html>
