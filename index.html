@@ -12,6 +12,9 @@ header{position:sticky;top:0;z-index:5;background:#111827;color:white;padding:14
 h1{font-size:18px;margin:0}.sub{font-size:12px;color:#cbd5e1}
 main{max-width:900px;margin:auto;padding:14px}.panel{background:white;border-radius:14px;padding:14px;margin:12px 0;box-shadow:0 2px 12px #0000000b}
 button,.btn{border:0;border-radius:10px;background:#2563eb;color:white;padding:12px 14px;font-size:15px;font-weight:600;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+#shareExport{background:#16a34a}
+.wechat-tip{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;padding:12px;border-radius:10px;font-size:14px;line-height:1.6}
 button.secondary{background:#e5e7eb;color:#111827}button.danger{background:#dc2626}
 input[type=file]{max-width:100%}.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 #viewerWrap{position:relative;background:#d1d5db;border-radius:10px;overflow:auto;min-height:180px;text-align:center;padding:8px}
@@ -31,7 +34,7 @@ label{font-size:14px}input[type=range]{width:100%}.status{font-size:13px;color:#
 </section>
 <section class="panel">
 <div id="viewerWrap"><canvas id="canvas"></canvas><canvas id="sigCanvas"></canvas></div>
-<div class="toolbar" style="margin-top:10px"><button id="signMode" disabled>放置签名</button><button id="clearPlaced" class="secondary" disabled>清除本页签名</button><button id="export" disabled>导出签名 PDF</button></div>
+<div class="toolbar" style="margin-top:10px"><button id="signMode" disabled>放置签名</button><button id="clearPlaced" class="secondary" disabled>清除本页签名</button><button id="export" disabled>下载签名 PDF</button><button id="shareExport" disabled>分享回微信</button></div>
 </section>
 <section class="panel">
 <h3 style="margin-top:0">绘制签名</h3>
@@ -64,7 +67,7 @@ preview.addEventListener('pointerup',()=>drawing=false);preview.addEventListener
 $('clearSig').onclick=()=>{pctx.clearRect(0,0,preview.width,preview.height);signature=null;$('useSig').disabled=true};
 $('useSig').onclick=()=>{signature=preview.toDataURL('image/png');placing=true;status('签名已准备好：点击 PDF 页面放置签名。')};
 $('sigFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;const img=new Image();img.onload=()=>{pctx.clearRect(0,0,preview.width,preview.height);let w=preview.width,h=preview.height,ratio=Math.min(w/img.width,h/img.height);pctx.drawImage(img,(w-img.width*ratio)/2,(h-img.height*ratio)/2,img.width*ratio,img.height*ratio);signature=preview.toDataURL('image/png');$('useSig').disabled=false;status('签名图片已载入。')};img.src=URL.createObjectURL(f)};
-$('pdfInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{pdfBytes=await f.arrayBuffer();pdf=await pdfjsLib.getDocument({data:pdfBytes}).promise;page=1;placed=[];await render();$('prev').disabled=$('next').disabled=false;$('export').disabled=false;$('signMode').disabled=false;$('clearPlaced').disabled=false;status('PDF 已载入。签名会嵌入导出文件。')}catch(err){status('打开失败：'+err.message)}};
+$('pdfInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{pdfBytes=await f.arrayBuffer();pdf=await pdfjsLib.getDocument({data:pdfBytes}).promise;page=1;placed=[];await render();$('prev').disabled=$('next').disabled=false;$('export').disabled=false;$('shareExport').disabled=false;$('signMode').disabled=false;$('clearPlaced').disabled=false;status('PDF 已载入。签名会嵌入导出文件。')}catch(err){status('打开失败：'+err.message)}};
 async function render(){const pg=await pdf.getPage(page),vp=pg.getViewport({scale:1.25});canvas.width=vp.width;canvas.height=vp.height;await pg.render({canvasContext:ctx,viewport:vp}).promise;$('pageInfo').textContent=`第 ${page} / ${pdf.numPages} 页`;sig.width=canvas.width;sig.height=canvas.height;sig.style.display='block';drawOverlay()}
 function drawOverlay(){sctx.clearRect(0,0,sig.width,sig.height);placed.filter(x=>x.page===page).forEach(x=>{let img=new Image();img.onload=()=>sctx.drawImage(img,x.x,x.y,x.w,x.h);img.src=x.data})}
 $('prev').onclick=async()=>{if(page>1){page--;await render()}};$('next').onclick=async()=>{if(page<pdf.numPages){page++;await render()}};
@@ -74,7 +77,10 @@ sig.addEventListener('pointermove',e=>{if(drag){let p=point(e,sig);drag.item.x=p
 sig.addEventListener('pointerup',()=>drag=null);sig.addEventListener('pointercancel',()=>drag=null);
 $('size').oninput=e=>$('sizeLabel').textContent=e.target.value;
 $('clearPlaced').onclick=()=>{placed=placed.filter(x=>x.page!==page);drawOverlay()};
-$('export').onclick=async()=>{if(!pdfBytes)return;try{status('正在生成 PDF…');const doc=await PDFDocument.load(pdfBytes);for(const item of placed){const pg=doc.getPage(item.page-1),{width,height}=pg.getSize();const png=await doc.embedPng(item.data);const x=item.x/canvas.width*width,y=height-(item.y+item.h)/canvas.height*height,w=item.w/canvas.width*width,h=item.h/canvas.height*height;pg.drawImage(png,{x,y,width:w,height:h})}const out=await doc.save(),blob=new Blob([out],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='signed.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status('导出完成：signed.pdf')}catch(err){status('导出失败：'+err.message)}};
+async function makeSignedPdf(){const doc=await PDFDocument.load(pdfBytes);for(const item of placed){const pg=doc.getPage(item.page-1),{width,height}=pg.getSize();const png=await doc.embedPng(item.data);const x=item.x/canvas.width*width,y=height-(item.y+item.h)/canvas.height*height,w=item.w/canvas.width*width,h=item.h/canvas.height*height;pg.drawImage(png,{x,y,width:w,height:h})}return new Blob([await doc.save()],{type:'application/pdf'})}
+function downloadBlob(blob,name='signed.pdf'){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500)}
+$('export').onclick=async()=>{if(!pdfBytes)return;try{status('正在生成 PDF…');downloadBlob(await makeSignedPdf());status('导出完成：signed.pdf')}catch(err){status('导出失败：'+err.message)}};
+$('shareExport').onclick=async()=>{if(!pdfBytes)return;try{status('正在生成 PDF…');const blob=await makeSignedPdf(),file=new File([blob],'signed.pdf',{type:'application/pdf'});if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'签名后的 PDF'});status('已打开系统分享菜单，可选择微信。')}else{downloadBlob(blob);status('当前浏览器不支持直接分享文件，已下载 PDF。请在微信聊天中发送该文件。')}}catch(err){if(err.name==='AbortError'){status('已取消分享。')}else{status('分享失败：'+err.message)}}};
 $('saveSig').onclick=()=>{if(signature){localStorage.setItem('pdfsig',signature);status('签名已保存在本机浏览器。')}else status('请先绘制或导入签名。')};
 $('loadSig').onclick=()=>{let s=localStorage.getItem('pdfsig');if(!s){status('本机尚无保存的签名。');return}signature=s;let im=new Image();im.onload=()=>{pctx.clearRect(0,0,preview.width,preview.height);pctx.drawImage(im,0,0,preview.width,preview.height);$('useSig').disabled=false;status('已载入本机签名。')};im.src=s};
 let deferred;$('install').onclick=()=>deferred?.prompt();window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e;$('install').style.display='block'});
